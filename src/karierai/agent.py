@@ -7,7 +7,7 @@ from typing import Any
 
 from .database import hybrid_search_jobs, run_safe_analytics
 from .llm import invoke_json, invoke_text, require_llm
-from .services import build_career_consultation, extract_cv_profile_data, extract_target_role
+from .services import build_career_consultation, build_recommendations, extract_cv_profile_data, extract_target_role
 
 PROMPTS = {
     "chat_query_router": (
@@ -17,10 +17,22 @@ PROMPTS = {
         "Balas hanya JSON valid."
     ),
     "chat_response_writer": (
-        "Anda adalah KarierAI, asisten karier berbahasa Indonesia yang terdengar natural. "
-        "Tulis jawaban yang hangat, jelas, langsung ke inti, dan tidak kaku. "
-        "Gunakan hanya evidence yang diberikan. Jangan tampilkan JSON mentah, jangan menyebut tool internal, "
-        "dan jangan mengarang fakta baru. Bila data kurang, katakan secara natural apa yang belum tersedia."
+        "Anda adalah KarierAI, asisten karier berbahasa Indonesia yang terdengar hangat, natural, dan profesional. "
+        "Tulis seperti percakapan manusia yang enak dibaca, bukan seperti dump database, laporan robotik, atau hasil tool. "
+        "Selalu mulai dari inti jawaban lebih dulu, lalu beri detail penting seperlunya. "
+        "Gunakan kalimat yang rapi dengan ritme natural. Hindari label teknis seperti JSON, field internal, evidence, tool, hybrid_score, atau job_id kecuali benar-benar perlu. "
+        "Kalau membahas lowongan, sebutkan nama posisi, perusahaan, lokasi, dan alasan singkat kenapa relevan. "
+        "Kalau membahas analisis CV atau konsultasi, jelaskan insight utama, kekuatan, gap, dan langkah lanjut dengan bahasa yang membumi. "
+        "Kalau data belum cukup, sampaikan dengan natural dan beri arahan berikutnya."
+    ),
+    "natural_response_rewriter": (
+        "Anda bertugas memoles jawaban agar terdengar seperti asisten karier Indonesia yang natural. "
+        "Pertahankan fakta inti, tetapi perbaiki diksi, alur, dan transisi supaya lebih cair, tidak kaku, dan tidak terasa seperti hasil template. "
+        "Jangan menambah fakta baru."
+    ),
+    "endpoint_response_writer": (
+        "Anda adalah KarierAI. Ubah data terstruktur menjadi jawaban bahasa Indonesia yang natural, ringkas, dan jelas. "
+        "Jangan menyalin nama field mentah. Fokus pada insight yang paling berguna bagi user."
     ),
 }
 
@@ -86,29 +98,128 @@ def _resolve_cv_text(query: str, history: str = "") -> str:
 
 
 
+def _to_text(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.2f}"
+    if isinstance(value, (list, tuple, set)):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        return ", ".join(items) if items else "-"
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    text = str(value).strip()
+    return text or "-"
+
+
+
 def _format_search_rows(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "Tidak ada lowongan relevan ditemukan."
-    blocks: list[str] = []
+    blocks: list[str] = ["Ringkasan lowongan yang ditemukan:"]
     for index, row in enumerate(rows, start=1):
-        retrieval_sources = row.get("retrieval_sources", [])
-        source_label = ", ".join(retrieval_sources) if isinstance(retrieval_sources, list) else "hybrid"
+        reasons: list[str] = []
+        work_type = str(row.get("work_type") or "").strip()
+        if work_type:
+            reasons.append(work_type)
+        location = str(row.get("location") or "").strip()
+        if location:
+            reasons.append(location)
+        if row.get("retrieval_sources"):
+            reasons.append(f"sumber: {_to_text(row.get('retrieval_sources'))}")
+        snippet = " ".join(str(row.get("job_description") or "").split())[:280]
         blocks.append(
             "\n".join(
                 [
-                    f"Result {index}",
-                    f"source: {source_label or 'hybrid'}",
-                    f"job_id: {row.get('job_id', 'N/A')}",
-                    f"title: {row.get('job_title', 'N/A')}",
-                    f"company: {row.get('company_name', 'N/A')}",
-                    f"location: {row.get('location', 'N/A')}",
-                    f"work_type: {row.get('work_type', 'N/A')}",
-                    f"hybrid_score: {row.get('hybrid_score', row.get('relevance_score', 0))}",
-                    f"snippet: {str(row.get('job_description', ''))[:500]}",
+                    f"{index}. {row.get('job_title', 'Lowongan tanpa judul')} di {row.get('company_name', 'Perusahaan tidak diketahui')}",
+                    f"   Lokasi/detail: {' | '.join(reasons) if reasons else '-'}",
+                    f"   Alasan relevan: {snippet or 'Deskripsi singkat belum tersedia.'}",
                 ]
             )
         )
-    return "\n\n".join(blocks)
+    return "\n".join(blocks)
+
+
+
+def _format_analytics_result(result: dict[str, Any]) -> str:
+    rows = result.get("rows") if isinstance(result.get("rows"), list) else []
+    lines = [
+        "Ringkasan hasil analisis data lowongan:",
+        f"- Mode: {_to_text(result.get('mode'))}",
+        f"- SQL tervalidasi: {_to_text(result.get('sql'))}",
+        f"- Penjelasan: {_to_text(result.get('explanation'))}",
+        f"- Jumlah baris hasil: {len(rows)}",
+    ]
+    if rows:
+        lines.append("- Contoh hasil teratas:")
+        for idx, row in enumerate(rows[:5], start=1):
+            if isinstance(row, dict):
+                summary = "; ".join(f"{key}={_to_text(value)}" for key, value in row.items())
+            else:
+                summary = _to_text(row)
+            lines.append(f"  {idx}. {summary}")
+    else:
+        lines.append("- Tidak ada baris hasil yang bisa diringkas.")
+    return "\n".join(lines)
+
+
+
+def _format_cv_profile(profile: dict[str, Any]) -> str:
+    contact = profile.get("contact") if isinstance(profile.get("contact"), dict) else {}
+    validation = profile.get("validation") if isinstance(profile.get("validation"), dict) else {}
+    lines = [
+        "Ringkasan profil CV:",
+        f"- Role utama yang terdeteksi: {_to_text(profile.get('primary_role_guess'))}",
+        f"- Role yang mungkin cocok: {_to_text(profile.get('likely_roles'))}",
+        f"- Estimasi pengalaman: {_to_text(profile.get('estimated_years_experience'))} tahun",
+        f"- Skill utama: {_to_text((profile.get('skills') or [])[:10])}",
+        f"- Email: {_to_text(contact.get('email'))}",
+        f"- Kelengkapan profil: {_to_text(validation.get('completeness_score'))}",
+    ]
+    strengths = profile.get("strengths") if isinstance(profile.get("strengths"), list) else []
+    if strengths:
+        lines.append(f"- Kekuatan yang tampak: {_to_text(strengths[:5])}")
+    return "\n".join(lines)
+
+
+
+def _format_consultation_payload(payload: dict[str, Any]) -> str:
+    market = payload.get("market_summary") if isinstance(payload.get("market_summary"), dict) else {}
+    lines = [
+        "Ringkasan konsultasi karier:",
+        f"- Target role: {_to_text(payload.get('target_role'))}",
+        f"- Skill yang sudah cocok: {_to_text(payload.get('matched_skills'))}",
+        f"- Skill yang masih kurang: {_to_text(payload.get('missing_skills'))}",
+        f"- Judul lowongan yang sering muncul: {_to_text(market.get('sample_titles'))}",
+        f"- Lokasi pasar teratas: {_to_text(market.get('top_locations'))}",
+        f"- Saran aksi: {_to_text(payload.get('recommendations'))}",
+    ]
+    return "\n".join(lines)
+
+
+
+def _format_recommendation_payload(payload: dict[str, Any]) -> str:
+    profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
+    matches = payload.get("matches") if isinstance(payload.get("matches"), list) else []
+    lines = [
+        "Ringkasan rekomendasi lowongan dari CV:",
+        f"- Query pencarian: {_to_text(payload.get('search_query'))}",
+        f"- Role utama CV: {_to_text(profile.get('primary_role_guess'))}",
+        f"- Skill CV yang paling menonjol: {_to_text((profile.get('skills') or [])[:8])}",
+        f"- Jumlah match yang diringkas: {len(matches)}",
+    ]
+    if matches:
+        lines.append("- Match teratas:")
+        for idx, item in enumerate(matches[:5], start=1):
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"  {idx}. {item.get('job_title', 'Lowongan')} di {item.get('company_name', 'Perusahaan')} | "
+                f"lokasi: {_to_text(item.get('location'))} | alasan: {_to_text(item.get('explanation'))}"
+            )
+    return "\n".join(lines)
 
 
 
@@ -148,11 +259,11 @@ def _route_chat(query: str, history: str = "") -> tuple[ChatRoutePlan, int, int,
 def _collect_evidence(plan: ChatRoutePlan, query: str, history: str = "") -> ChatExecutionResult:
     if plan.intent == "hybrid":
         rag_output = _search_jobs(plan.search_query, k=3)
-        sql_output = json.dumps(run_safe_analytics(query), ensure_ascii=False)
+        sql_output = _format_analytics_result(run_safe_analytics(query))
         return ChatExecutionResult([rag_output, sql_output], ["rag_search_jobs", "sql_query_jobs"], [rag_output, sql_output])
 
     if plan.intent == "sql":
-        sql_output = json.dumps(run_safe_analytics(query), ensure_ascii=False)
+        sql_output = _format_analytics_result(run_safe_analytics(query))
         return ChatExecutionResult([sql_output], ["sql_query_jobs"], [sql_output])
 
     if plan.intent == "rag":
@@ -161,24 +272,19 @@ def _collect_evidence(plan: ChatRoutePlan, query: str, history: str = "") -> Cha
 
     cv_text = _resolve_cv_text(query, history)
     if not cv_text:
-        missing_cv_payload = json.dumps(
-            {
-                "status": "needs_cv_text",
-                "message": "User belum memberikan teks CV yang cukup untuk dianalisis.",
-                "guidance": "Minta user mengirim teks CV lengkap atau upload file CV lewat endpoint file.",
-                "target_role": plan.target_role or extract_target_role(query),
-            },
-            ensure_ascii=False,
+        missing_cv_message = (
+            "Data CV belum tersedia. User belum memberikan teks CV yang cukup untuk dianalisis. "
+            "Minta user mengirim teks CV lengkap atau upload file CV. "
+            f"Kalau target role sudah terlihat, role yang diduga: {plan.target_role or extract_target_role(query) or '-'}"
         )
-        return ChatExecutionResult([missing_cv_payload], [], [missing_cv_payload])
+        return ChatExecutionResult([missing_cv_message], [], [missing_cv_message])
 
     if plan.intent == "cv":
-        profile_payload = json.dumps(extract_cv_profile_data(cv_text), ensure_ascii=False)
+        profile_payload = _format_cv_profile(extract_cv_profile_data(cv_text))
         return ChatExecutionResult([profile_payload], ["extract_cv_profile"], [profile_payload])
 
-    consultation_payload = json.dumps(
-        build_career_consultation(cv_text, plan.target_role or extract_target_role(query) or "Data Analyst"),
-        ensure_ascii=False,
+    consultation_payload = _format_consultation_payload(
+        build_career_consultation(cv_text, plan.target_role or extract_target_role(query) or "Data Analyst")
     )
     return ChatExecutionResult([consultation_payload], ["analyze_skill_gap"], [consultation_payload])
 
@@ -186,7 +292,7 @@ def _collect_evidence(plan: ChatRoutePlan, query: str, history: str = "") -> Cha
 
 def _compose_response(query: str, history: str, plan: ChatRoutePlan, evidence_blocks: list[str]) -> ChatSynthesisResult:
     require_llm()
-    evidence = "\n\n".join(f"[Evidence {index}]\n{block}" for index, block in enumerate(evidence_blocks, start=1))
+    evidence = "\n\n".join(f"[Konteks {index}]\n{block}" for index, block in enumerate(evidence_blocks, start=1))
     writer_prompt = get_prompt("chat_response_writer") + (
         f"\n\nIntent terpilih: {plan.intent}\n"
         f"Query asli user: {query}\n"
@@ -194,13 +300,56 @@ def _compose_response(query: str, history: str, plan: ChatRoutePlan, evidence_bl
         f"History ringkas: {history or '-'}\n"
         f"Confidence router: {plan.confidence}\n"
         f"Alasan router: {plan.reason or '-'}\n\n"
-        f"Evidence:\n{evidence or '-'}"
+        "Tulis jawaban akhir dalam bahasa Indonesia natural dengan aturan berikut:\n"
+        "1. Paragraf pertama harus langsung menjawab inti pertanyaan user.\n"
+        "2. Bila relevan, lanjutkan dengan poin atau paragraf pendek yang mudah dipindai.\n"
+        "3. Jangan menyalin label teknis atau struktur mentah dari konteks.\n"
+        "4. Kalau konteks berisi beberapa lowongan, pilih yang paling relevan dan jelaskan singkat.\n"
+        "5. Tutup dengan langkah lanjut yang membantu bila diperlukan.\n\n"
+        f"Konteks pendukung:\n{evidence or '-'}"
     )
-    result = invoke_text(writer_prompt, temperature=0.35)
-    response = result.content.strip()
-    if not response:
+    draft = invoke_text(writer_prompt, temperature=0.55)
+    draft_response = draft.content.strip()
+    if not draft_response:
         raise RuntimeError("LLM writer tidak mengembalikan jawaban.")
-    return ChatSynthesisResult(response=response, input_tokens=result.input_tokens, output_tokens=result.output_tokens)
+
+    rewrite_prompt = get_prompt("natural_response_rewriter") + (
+        f"\n\nPertanyaan user: {query}\n"
+        f"Draft jawaban:\n{draft_response}\n\n"
+        "Rapikan supaya lebih cair dan natural, tetap ringkas, dan pertahankan makna inti."
+    )
+    rewritten = invoke_text(rewrite_prompt, temperature=0.45)
+    final_response = rewritten.content.strip() or draft_response
+    return ChatSynthesisResult(
+        response=final_response,
+        input_tokens=draft.input_tokens + rewritten.input_tokens,
+        output_tokens=draft.output_tokens + rewritten.output_tokens,
+    )
+
+
+
+def write_natural_endpoint_response(task: str, payload: dict[str, Any]) -> tuple[str, int, int]:
+    require_llm()
+    if task == "cv_analysis":
+        context_block = _format_cv_profile(payload.get("profile") if isinstance(payload.get("profile"), dict) else payload)
+    elif task == "recommendation":
+        context_block = _format_recommendation_payload(payload)
+    elif task == "consultation":
+        context_block = _format_consultation_payload(payload)
+    else:
+        context_block = json.dumps(payload, ensure_ascii=False)
+
+    prompt = get_prompt("endpoint_response_writer") + (
+        f"\n\nTugas narasi: {task}\n"
+        "Tulis jawaban natural dalam bahasa Indonesia. Boleh 1-3 paragraf pendek atau poin singkat bila memang membantu.\n"
+        "Mulai dari insight yang paling penting, lalu jelaskan detail penting seperlunya.\n"
+        f"\nKonteks:\n{context_block}"
+    )
+    result = invoke_text(prompt, temperature=0.6)
+    text = result.content.strip()
+    if not text:
+        raise RuntimeError("LLM endpoint writer tidak mengembalikan jawaban.")
+    return text, result.input_tokens, result.output_tokens
 
 
 
@@ -213,5 +362,5 @@ def local_chat_response(query: str, history: str = "") -> dict[str, Any]:
         "input_tokens": input_tokens + synthesis.input_tokens,
         "output_tokens": output_tokens + synthesis.output_tokens,
         "tool_messages": [route_message, *execution.tool_messages],
-        "used_tools": ["llm_query_router", *execution.used_tools, "llm_response_writer"],
+        "used_tools": ["llm_query_router", *execution.used_tools, "llm_response_writer", "llm_response_rewriter"],
     }

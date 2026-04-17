@@ -80,7 +80,7 @@ CMD ["sh", "-c", "uvicorn src.agent_st.server:app --host 0.0.0.0 --port ${PORT:-
 Gunakan Cloud Build untuk membungkus aplikasi Anda menjadi sebuah container image.
 
 ```bash
-gcloud builds submit --tag gcr.io/finpro-493407/karierai
+gcloud builds submit --tag gcr.io/finpro-493407/karier
 ```
 
 ---
@@ -94,8 +94,8 @@ Kita akan mendeploy image tersebut dan memasukkan semua konfigurasi dari file `.
 ENV_VARS=$(grep -v '^#' .env | xargs | sed 's/ /,/g')
 
 # 2. Deploy ke Cloud Run
-gcloud run deploy karierai \
-  --image gcr.io/finpro-493407/karierai \
+gcloud run deploy karier\
+  --image gcr.io/finpro-493407/karier\
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \

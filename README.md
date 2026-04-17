@@ -295,13 +295,13 @@ Project ini memiliki `Dockerfile` dan image default menjalankan **backend API**.
 
 ### Build image
 ```bash
-docker build -t karierai .
+docker build -t karier .
 ```
 
 ### Init SQLite
 #### Linux/macOS
 ```bash
-docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" karierai sh -c "PYTHONPATH=src python script/init_sqlite.py"
+docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" karier sh -c "PYTHONPATH=src python script/init_sqlite.py"
 ```
 
 #### Windows PowerShell
@@ -312,7 +312,7 @@ docker run --rm --env-file .env -v "${PWD}/dataset:/app/dataset" karierai sh -c 
 ### Ingestion dataset
 #### Linux/macOS
 ```bash
-docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" karierai sh -c "PYTHONPATH=src python script/run_ingestion.py"
+docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" karier sh -c "PYTHONPATH=src python script/run_ingestion.py"
 ```
 
 #### Windows PowerShell
@@ -323,7 +323,7 @@ docker run --rm --env-file .env -v "${PWD}/dataset:/app/dataset" karierai sh -c 
 ### Jalankan API
 #### Linux/macOS
 ```bash
-docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" -p 8080:8080 karierai
+docker run --rm --env-file .env -v "$(pwd)/dataset:/app/dataset" -p 8080:8080 karier
 ```
 
 #### Windows PowerShell

@@ -81,6 +81,7 @@ class CVAnalyzeRequest(BaseModel):
 
 class CVAnalyzeResponse(BaseModel):
     profile: dict[str, Any]
+    response_text: str | None = None
 
 
 class RecommendationMatch(BaseModel):
@@ -113,6 +114,7 @@ class RecommendationResponse(BaseModel):
     profile: dict[str, Any]
     search_query: str
     matches: list[RecommendationMatch] = Field(default_factory=list)
+    response_text: str | None = None
 
 
 class ConsultationRequest(BaseModel):
@@ -145,6 +147,7 @@ class ConsultationResponse(BaseModel):
     missing_skills: list[str] = Field(default_factory=list)
     market_summary: dict[str, Any] = Field(default_factory=dict)
     recommendations: list[str] = Field(default_factory=list)
+    response_text: str | None = None
 
 
 class RouteTaskInput(BaseModel):

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
-from .agent import get_prompt, local_chat_response
+from .agent import get_prompt, local_chat_response, write_natural_endpoint_response
 from .config import get_settings
 from .database import get_database_stats
 from .ingestion import ingest_jobs
@@ -131,37 +131,50 @@ async def _extract_cv_text_from_upload(file: UploadFile) -> str:
         raise HTTPException(status_code=500, detail='Gagal memproses file CV yang diunggah.') from exc
 
 
+def _with_response_text(task: str, payload: dict[str, object]) -> dict[str, object]:
+    response_text, _, _ = write_natural_endpoint_response(task, payload)
+    enriched = dict(payload)
+    enriched['response_text'] = response_text
+    return enriched
+
+
 @app.post('/cv/analyze', response_model=CVAnalyzeResponse)
 def cv_analyze(request: CVAnalyzeRequest) -> CVAnalyzeResponse:
-    return CVAnalyzeResponse(profile=extract_cv_profile_data(request.cv_text))
+    profile = extract_cv_profile_data(request.cv_text)
+    return CVAnalyzeResponse(**_with_response_text('cv_analysis', {'profile': profile}))
 
 
 @app.post('/cv/analyze-file', response_model=CVAnalyzeResponse)
 async def cv_analyze_file(file: UploadFile = File(...)) -> CVAnalyzeResponse:
     cv_text = await _extract_cv_text_from_upload(file)
-    return CVAnalyzeResponse(profile=extract_cv_profile_data(cv_text))
+    profile = extract_cv_profile_data(cv_text)
+    return CVAnalyzeResponse(**_with_response_text('cv_analysis', {'profile': profile}))
 
 
 @app.post('/recommend', response_model=RecommendationResponse)
 def recommend(request: RecommendationRequest) -> RecommendationResponse:
-    return RecommendationResponse(**build_recommendations(request.cv_text, top_k=request.top_k))
+    payload = build_recommendations(request.cv_text, top_k=request.top_k)
+    return RecommendationResponse(**_with_response_text('recommendation', payload))
 
 
 @app.post('/recommend-file', response_model=RecommendationResponse)
 async def recommend_file(file: UploadFile = File(...), top_k: int = Form(5)) -> RecommendationResponse:
     cv_text = await _extract_cv_text_from_upload(file)
-    return RecommendationResponse(**build_recommendations(cv_text, top_k=top_k))
+    payload = build_recommendations(cv_text, top_k=top_k)
+    return RecommendationResponse(**_with_response_text('recommendation', payload))
 
 
 @app.post('/consult', response_model=ConsultationResponse)
 def consult(request: ConsultationRequest) -> ConsultationResponse:
-    return ConsultationResponse(**build_career_consultation(request.cv_text, request.target_role))
+    payload = build_career_consultation(request.cv_text, request.target_role)
+    return ConsultationResponse(**_with_response_text('consultation', payload))
 
 
 @app.post('/consult-file', response_model=ConsultationResponse)
 async def consult_file(file: UploadFile = File(...), target_role: str = Form(...)) -> ConsultationResponse:
     cv_text = await _extract_cv_text_from_upload(file)
-    return ConsultationResponse(**build_career_consultation(cv_text, target_role))
+    payload = build_career_consultation(cv_text, target_role)
+    return ConsultationResponse(**_with_response_text('consultation', payload))
 
 
 @app.get('/prompts/{prompt_name}')

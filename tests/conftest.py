@@ -77,16 +77,26 @@ def patch_llm_only_flow(monkeypatch):
 
     def fake_invoke_text(prompt: str, temperature: float = 0.2):
         intent = _extract(prompt, "Intent terpilih")
-        if '"status": "needs_cv_text"' in prompt or "needs_cv_text" in prompt:
+        task = _extract(prompt, "Tugas narasi")
+        if '"status": "needs_cv_text"' in prompt or "Data CV belum tersedia" in prompt or "needs_cv_text" in prompt:
             content = "Aku belum bisa kasih evaluasi yang spesifik karena teks CV-mu belum ada. Kirim teks CV lengkap atau upload file CV dulu, lalu aku bantu analisis dengan lebih akurat."
+        elif task == "cv_analysis":
+            content = "CV ini sudah memberi sinyal yang cukup jelas soal arah kariermu. Kekuatan utamanya ada di role yang terdeteksi, skill inti, dan pengalaman yang terlihat dari profil."
+        elif task == "recommendation":
+            content = "Dari CV yang kamu kirim, ada beberapa lowongan yang paling nyambung dengan profilmu. Prioritas utamanya biasanya terlihat dari kecocokan role, skill, dan konteks lokasi atau tipe kerja."
+        elif task == "consultation":
+            content = "Kalau targetmu adalah role ini, fokus terbaiknya adalah memperkuat gap skill yang paling penting dulu sambil menjaga kekuatan yang sudah kamu punya."
+        elif "Draft jawaban:" in prompt:
+            draft = prompt.split("Draft jawaban:", 1)[1].strip()
+            content = draft.split("Rapikan supaya", 1)[0].strip() or "Saya sudah rapikan jawabannya supaya lebih natural, tetap jelas, dan langsung ke inti tanpa terasa kaku."
         elif intent == "sql":
-            content = "Dari data lowongan yang ada, pertanyaanmu sudah saya olah lewat query SQL dan hasil utamanya ada di evidence. Intinya, pola angkanya sudah terbaca dengan jelas dan bisa dipakai untuk membandingkan lokasi atau jumlah lowongan."
+            content = "Dari data lowongan yang ada, pertanyaanmu sudah saya olah dan pola utamanya sudah terlihat jelas. Hasil ini bisa dipakai untuk membandingkan lokasi, jumlah lowongan, atau tren gaji secara lebih praktis."
         elif intent == "rag":
-            content = "Saya sudah cari lowongan yang paling relevan dan merangkumnya dalam bahasa yang lebih natural. Kalau mau, pencarian ini bisa dipersempit lagi berdasarkan lokasi, skill, atau tipe kerja."
+            content = "Saya sudah cari lowongan yang paling relevan dan merangkumnya dengan bahasa yang lebih natural. Kalau mau, pencarian ini bisa dipersempit lagi berdasarkan lokasi, skill, atau tipe kerja."
         elif intent == "consultation":
             content = "Dari konteks CV dan target role, saya sudah susun masukan karier yang paling relevan. Fokus utamanya adalah memperkuat gap skill yang paling berpengaruh dulu."
         else:
-            content = "Saya sudah menyusun jawaban akhir dari evidence yang tersedia dengan gaya yang lebih natural."
+            content = "Saya sudah menyusun jawaban akhir dari konteks yang tersedia dengan gaya yang lebih natural."
         return LLMResult(content=content, input_tokens=23, output_tokens=17)
 
     monkeypatch.setattr(llm, "require_llm", lambda: None)

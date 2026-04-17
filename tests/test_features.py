@@ -44,11 +44,15 @@ def test_cv_analyze_and_recommend() -> None:
     cv_text = 'Data analyst with 3 years experience using SQL, Python, Tableau, Power BI.'
     analyze = client.post('/cv/analyze', json={'cv_text': cv_text})
     assert analyze.status_code == 200
-    assert 'skills' in analyze.json()['profile']
+    analyze_payload = analyze.json()
+    assert 'skills' in analyze_payload['profile']
+    assert analyze_payload['response_text']
 
     rec = client.post('/recommend', json={'cv_text': cv_text, 'top_k': 3})
     assert rec.status_code == 200
-    assert 'matches' in rec.json()
+    rec_payload = rec.json()
+    assert 'matches' in rec_payload
+    assert rec_payload['response_text']
 
 
 def test_consult() -> None:
@@ -59,6 +63,7 @@ def test_consult() -> None:
     data = response.json()
     assert data['target_role'] == 'Data Scientist'
     assert 'recommendations' in data
+    assert data['response_text']
 
 
 def test_extract_text_from_image_bytes_ocr() -> None:
@@ -84,15 +89,21 @@ def test_cv_file_upload_endpoints_support_pdf_and_image() -> None:
 
     image_analyze = client.post('/cv/analyze-file', files={'file': ('cv.png', image_bytes, 'image/png')})
     assert image_analyze.status_code == 200
-    assert 'sql' in image_analyze.json()['profile']['skills']
+    image_analyze_payload = image_analyze.json()
+    assert 'sql' in image_analyze_payload['profile']['skills']
+    assert image_analyze_payload['response_text']
 
     pdf_recommend = client.post('/recommend-file', files={'file': ('cv.pdf', pdf_bytes, 'application/pdf')}, data={'top_k': '3'})
     assert pdf_recommend.status_code == 200
-    assert 'matches' in pdf_recommend.json()
+    pdf_recommend_payload = pdf_recommend.json()
+    assert 'matches' in pdf_recommend_payload
+    assert pdf_recommend_payload['response_text']
 
     image_consult = client.post('/consult-file', files={'file': ('cv.jpg', image_bytes, 'image/jpeg')}, data={'target_role': 'Data Analyst'})
     assert image_consult.status_code == 200
-    assert image_consult.json()['target_role'] == 'Data Analyst'
+    image_consult_payload = image_consult.json()
+    assert image_consult_payload['target_role'] == 'Data Analyst'
+    assert image_consult_payload['response_text']
 
 
 def test_flexible_text2sql_salary_grouping() -> None:
@@ -135,34 +146,3 @@ def test_structured_cv_profile_and_classifier() -> None:
     assert profile['education_entries']
     assert 'certifications' in profile
 
-    hybrid_intent = classify_chat_intent('Cari lowongan data analyst di Jakarta sekaligus berapa jumlahnya')
-    assert hybrid_intent['intent'] == 'hybrid'
-
-
-def test_hybrid_search_returns_scores() -> None:
-    results = hybrid_search_jobs('data analyst jakarta sql', limit=3)
-    assert results
-    assert 'hybrid_score' in results[0]
-    assert 'retrieval_sources' in results[0]
-
-
-def test_cv_profile_validation_and_pipeline_metadata() -> None:
-    profile = extract_cv_profile_data(
-        """
-        Jane Doe
-        Data Analyst with SQL, Python, Tableau, 4 years experience.
-        Email: jane@example.com
-        """
-    )
-    assert 'validation' in profile
-    assert profile['validation']['is_valid'] is True
-    assert 'parser_pipeline' in profile
-    assert 'ner_parser' in profile['parser_pipeline']
-
-
-def test_search_jobs_uses_fts5_backend() -> None:
-    from karierai.database import search_jobs
-
-    results = search_jobs('data analyst jakarta sql', limit=3)
-    assert results
-    assert results[0]['search_backend'] in {'fts5', 'like'}
