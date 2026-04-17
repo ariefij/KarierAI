@@ -6,21 +6,15 @@ RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     tesseract-ocr \
-    tesseract-ocr-eng \
     tesseract-ocr-ind \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 ENV PYTHONPATH="/app/src"
 
-COPY pyproject.toml poetry.lock* ./
-COPY src ./src
-COPY dataset ./dataset
-COPY script ./script
-COPY README.md ./
-COPY deployment_gcp.md ./
-COPY flow.png ./
+COPY . .
 
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-interaction --no-ansi
